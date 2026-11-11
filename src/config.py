@@ -13,6 +13,7 @@ POLITICAS = {
     "onInconclusive": "warn",
 }
 ACCIONES = {"fail", "warn"}
+WARMUP_POR_DEFECTO = 60
 
 
 def _validar_umbrales(valores, donde):
@@ -26,7 +27,7 @@ def _validar_umbrales(valores, donde):
 
 
 def cargar_config(ruta=None):
-    """Devuelve {"defaults": {...}, "endpoints": {...}, "politicas": {...}}."""
+    """Devuelve {"warmupSeconds": n, "defaults": {...}, "endpoints": {...}, "politicas": {...}}."""
     crudo = {}
     if ruta:
         with open(ruta, encoding="utf-8") as archivo:
@@ -37,10 +38,14 @@ def cargar_config(ruta=None):
         if not isinstance(crudo, dict):
             raise ValueError("Configuración: el archivo debe contener un objeto JSON")
 
-    permitidas = {"defaults", "endpoints", *POLITICAS}
+    permitidas = {"warmupSeconds", "defaults", "endpoints", *POLITICAS}
     desconocidas = set(crudo) - permitidas
     if desconocidas:
         raise ValueError(f"Configuración: claves desconocidas {sorted(desconocidas)}")
+
+    warmup = crudo.get("warmupSeconds", WARMUP_POR_DEFECTO)
+    if isinstance(warmup, bool) or not isinstance(warmup, (int, float)) or warmup < 0:
+        raise ValueError(f"Configuración: 'warmupSeconds' debe ser un número >= 0, recibió {warmup!r}")
 
     defaults = crudo.get("defaults", {})
     _validar_umbrales(defaults, "defaults")
@@ -61,6 +66,7 @@ def cargar_config(ruta=None):
         politicas[clave] = valor
 
     return {
+        "warmupSeconds": warmup,
         "defaults": {**UMBRALES, **defaults},
         "endpoints": endpoints,
         "politicas": politicas,

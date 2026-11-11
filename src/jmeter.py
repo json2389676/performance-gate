@@ -17,11 +17,14 @@ def percentil(valores, p):
     return ordenados[max(posicion, 1) - 1]
 
 
-def leer_jmeter(ruta):
-    endpoints = defaultdict(lambda: {"tiempos": [], "errores": 0})
+def leer_jmeter(ruta, warmup_segundos=0):
+    """Lee el CSV. Ignora las peticiones de los primeros `warmup_segundos` de la prueba,
+    medidos desde la primera petición del archivo (las filas no vienen ordenadas)."""
+    requeridas = COLUMNAS_REQUERIDAS | ({"timeStamp"} if warmup_segundos > 0 else set())
+    filas = []
     with open(ruta, newline="", encoding="utf-8-sig") as archivo:
         lector = csv.DictReader(archivo)
-        faltantes = COLUMNAS_REQUERIDAS - set(lector.fieldnames or [])
+        faltantes = requeridas - set(lector.fieldnames or [])
         if faltantes:
             raise ValueError(f"Faltan columnas en {ruta}: {sorted(faltantes)}")
 
@@ -37,13 +40,33 @@ def leer_jmeter(ruta):
                 )
             if elapsed < 0 or math.isnan(elapsed) or math.isinf(elapsed):
                 raise ValueError(f"{ruta}, línea {numero}: elapsed fuera de rango: {elapsed}")
-            datos = endpoints[etiqueta]
-            datos["tiempos"].append(elapsed)
-            if (fila["success"] or "").strip().lower() != "true":
-                datos["errores"] += 1
+            inicio = 0.0
+            if warmup_segundos > 0:
+                try:
+                    inicio = float(fila["timeStamp"])
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"{ruta}, línea {numero}: timeStamp inválido: {fila['timeStamp']!r}"
+                    )
+            exito = (fila["success"] or "").strip().lower() == "true"
+            filas.append((etiqueta, elapsed, exito, inicio))
 
-    if not endpoints:
+    if not filas:
         raise ValueError(f"{ruta} no tiene filas de datos")
+
+    if warmup_segundos > 0:
+        t0 = min(f[3] for f in filas)
+        filas = [f for f in filas if f[3] - t0 >= warmup_segundos * 1000]
+        if not filas:
+            raise ValueError(
+                f"{ruta}: no quedan peticiones después de ignorar los primeros {warmup_segundos} s"
+            )
+
+    endpoints = defaultdict(lambda: {"tiempos": [], "errores": 0})
+    for etiqueta, elapsed, exito, _ in filas:
+        endpoints[etiqueta]["tiempos"].append(elapsed)
+        if not exito:
+            endpoints[etiqueta]["errores"] += 1
 
     metricas = {}
     for etiqueta, datos in endpoints.items():

@@ -16,9 +16,9 @@ from jmeter import leer_jmeter, percentil  # noqa: E402
 ENCABEZADO = "timeStamp,elapsed,label,responseCode,responseMessage,threadName,success,bytes,Latency,allThreads\n"
 
 
-def fila(label, elapsed, ok=True):
+def fila(label, elapsed, ok=True, ts=1):
     etiqueta = f'"{label}"' if "," in label else label
-    return f"1,{elapsed},{etiqueta},{200 if ok else 500},OK,Usuarios 1-1,{'true' if ok else 'false'},1,1,50\n"
+    return f"{ts},{elapsed},{etiqueta},{200 if ok else 500},OK,Usuarios 1-1,{'true' if ok else 'false'},1,1,50\n"
 
 
 class BaseConArchivos(unittest.TestCase):
@@ -33,7 +33,7 @@ class BaseConArchivos(unittest.TestCase):
         return ruta
 
     def csv_endpoint(self, nombre, label, tiempos, errores=0):
-        filas = [fila(label, t, ok=i >= errores) for i, t in enumerate(tiempos)]
+        filas = [fila(label, t, ok=i >= errores, ts=i * 1000) for i, t in enumerate(tiempos)]
         return self.csv(nombre, ENCABEZADO + "".join(filas))
 
     def config(self, datos):
@@ -86,6 +86,31 @@ class PruebasLectorJMeter(BaseConArchivos):
         with self.assertRaises(ValueError):
             leer_jmeter(self.csv("a.csv", ENCABEZADO + fila("GET /x", -5)))
 
+    def test_ignora_calentamiento(self):
+        # 0-59 s lento (1000 ms), 60-199 s rápido (100 ms); las filas llegan desordenadas.
+        filas = [fila("GET /x", 1000 if s < 60 else 100, ts=1_000_000 + s * 1000) for s in range(200)]
+        ruta = self.csv("a.csv", ENCABEZADO + "".join(reversed(filas)))
+        completo = leer_jmeter(ruta)["GET /x"]
+        estable = leer_jmeter(ruta, warmup_segundos=60)["GET /x"]
+        self.assertEqual(completo["muestras"], 200)
+        self.assertEqual(completo["p95"], 1000)
+        self.assertEqual(estable["muestras"], 140)
+        self.assertEqual(estable["p95"], 100)
+
+    def test_calentamiento_requiere_timestamp(self):
+        ruta = self.csv("a.csv", "label,elapsed,success\nGET /x,10,true\n")
+        self.assertEqual(leer_jmeter(ruta)["GET /x"]["muestras"], 1)
+        with self.assertRaises(ValueError):
+            leer_jmeter(ruta, warmup_segundos=60)
+
+    def test_timestamp_invalido_con_calentamiento(self):
+        with self.assertRaises(ValueError):
+            leer_jmeter(self.csv("a.csv", ENCABEZADO + fila("GET /x", 10, ts="abc")), warmup_segundos=60)
+
+    def test_calentamiento_mayor_que_la_prueba(self):
+        with self.assertRaises(ValueError):
+            leer_jmeter(self.csv_endpoint("a.csv", "GET /x", [10] * 5), warmup_segundos=60)
+
     def test_endpoint_vacio(self):
         with self.assertRaises(ValueError):
             leer_jmeter(self.csv("a.csv", ENCABEZADO + fila("", 10)))
@@ -110,6 +135,15 @@ class PruebasConfig(BaseConArchivos):
         for valor in (-1, "10", True):
             with self.assertRaises(ValueError):
                 self.config({"defaults": {"p95RegressionPercent": valor}})
+
+    def test_warmup_por_defecto_y_configurable(self):
+        self.assertEqual(cargar_config()["warmupSeconds"], 60)
+        self.assertEqual(self.config({"warmupSeconds": 0})["warmupSeconds"], 0)
+
+    def test_warmup_invalido(self):
+        for valor in (-1, "60", True):
+            with self.assertRaises(ValueError):
+                self.config({"warmupSeconds": valor})
 
     def test_politica_invalida(self):
         with self.assertRaises(ValueError):
@@ -237,6 +271,14 @@ class PruebasCLI(BaseConArchivos):
         mala = self.csv("m.json", '{"defaults": {"minimumSamples": -1}}')
         self.assertEqual(self.ejecutar("--baseline", base, "--candidate", base, "--config", mala)[0], 2)
 
+    def test_calentamiento_cambia_el_veredicto(self):
+        def prueba(nombre, lento_al_inicio):
+            filas = [fila("GET /x", 900 if (lento_al_inicio and s < 60) else 100, ts=s * 1000) for s in range(200)]
+            return self.csv(nombre, ENCABEZADO + "".join(filas))
+        base, cand = prueba("b.csv", False), prueba("c.csv", True)
+        self.assertEqual(self.ejecutar("--baseline", base, "--candidate", cand)[0], 0)
+        self.assertEqual(self.ejecutar("--baseline", base, "--candidate", cand, "--warmup-seconds", "0")[0], 1)
+
     def test_escribe_reportes(self):
         base = self.csv_endpoint("b.csv", "GET /x", [100] * 200)
         md, js = os.path.join(self.dir.name, "r.md"), os.path.join(self.dir.name, "r.json")
@@ -259,8 +301,19 @@ class PruebasConDatosDelReto(unittest.TestCase):
     def test_version_a_no_pasa(self):
         self.assertEqual(self.ejecutar("version-a"), 1)
 
-    def test_version_b_no_pasa(self):
-        self.assertEqual(self.ejecutar("version-b"), 1)
+    def test_version_b_pasa_una_vez_estabilizada(self):
+        self.assertEqual(self.ejecutar("version-b"), 0)
+
+    def test_version_b_no_pasa_si_se_mide_el_arranque(self):
+        res = os.path.join(RAIZ, "resultados")
+        with contextlib.redirect_stdout(io.StringIO()):
+            codigo = gate.main([
+                "--baseline", os.path.join(res, "produccion-actual.csv"),
+                "--candidate", os.path.join(res, "version-b.csv"),
+                "--config", os.path.join(RAIZ, "config", "performance-gate.json"),
+                "--warmup-seconds", "0",
+            ])
+        self.assertEqual(codigo, 1)
 
     def test_produccion_contra_si_misma_pasa(self):
         self.assertEqual(self.ejecutar("produccion-actual"), 0)

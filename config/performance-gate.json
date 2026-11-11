@@ -1,4 +1,5 @@
 {
+  "warmupSeconds": 60,
   "defaults": {
     "p95RegressionPercent": 10,
     "p95RegressionMinMs": 20,

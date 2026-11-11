@@ -102,8 +102,17 @@ def evaluar(base, cand, config):
     estados = {e["estado"] for e in endpoints}
     return {
         "veredicto": "fail" if "fail" in estados else "pass",
+        "warmupSeconds": config["warmupSeconds"],
         "endpoints": endpoints,
     }
+
+
+def _nota_calentamiento(resultado):
+    seg = resultado["warmupSeconds"]
+    if seg <= 0:
+        return "Se evaluó la prueba completa (sin ignorar calentamiento)."
+    return (f"Se ignoraron los primeros {num(seg)} s de cada prueba (calentamiento); "
+            "se compara el rendimiento ya estabilizado.")
 
 
 ETIQUETA = {"pass": "PASA", "warn": "ADVERTENCIA", "fail": "FALLA"}
@@ -122,7 +131,7 @@ def _cambio(e):
 
 
 def texto_consola(resultado):
-    lineas = []
+    lineas = [_nota_calentamiento(resultado), ""]
     for e in resultado["endpoints"]:
         lineas.append(
             f"[{ETIQUETA[e['estado']]:<11}] {e['endpoint']:<34} "
@@ -156,6 +165,7 @@ def markdown(resultado, titulo):
     out.append(
         "## ✅ La versión pasa" if veredicto == "pass" else "## ❌ La versión NO pasa"
     )
+    out += ["", f"_{_nota_calentamiento(resultado)}_"]
     out += ["", "| Estado | Endpoint | p95 prod (ms) | p95 nueva (ms) | Cambio | Errores prod | Errores nueva | Muestras (prod / nueva) |",
             "|---|---|---:|---:|---:|---:|---:|---:|"]
     for e in resultado["endpoints"]:
@@ -184,6 +194,8 @@ def main(argv=None):
     parser.add_argument("--config", help="Archivo JSON con los límites (opcional)")
     parser.add_argument("--format", default="jmeter", choices=sorted(LECTORES),
                         help="Formato de los resultados (por defecto: jmeter)")
+    parser.add_argument("--warmup-seconds", type=float,
+                        help="Segundos iniciales a ignorar (sobrescribe warmupSeconds de la configuración)")
     parser.add_argument("--title", default="Performance Quality Gate")
     parser.add_argument("--report-md", help="Ruta donde escribir el reporte en Markdown")
     parser.add_argument("--report-json", help="Ruta donde escribir el resultado en JSON")
@@ -191,9 +203,13 @@ def main(argv=None):
 
     try:
         config = cargar_config(args.config)
+        if args.warmup_seconds is not None:
+            if args.warmup_seconds < 0:
+                raise ValueError("--warmup-seconds debe ser >= 0")
+            config["warmupSeconds"] = args.warmup_seconds
         leer = LECTORES[args.format]
-        base = leer(args.baseline)
-        cand = leer(args.candidate)
+        base = leer(args.baseline, config["warmupSeconds"])
+        cand = leer(args.candidate, config["warmupSeconds"])
     except (OSError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
