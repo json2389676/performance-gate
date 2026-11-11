@@ -1,0 +1,45 @@
+name: Performance gate (versiones A y B)
+
+# Pipeline que usa la action del repositorio. Cada versión se evalúa en su propio
+# job; si una no pasa, ese job queda en rojo (el otro sigue ejecutándose).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Gate ${{ matrix.nombre }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nombre: versión A
+            slug: version-a
+            archivo: resultados/version-a.csv
+          - nombre: versión B
+            slug: version-b
+            archivo: resultados/version-b.csv
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Performance Quality Gate
+        uses: ./
+        with:
+          baseline: resultados/produccion-actual.csv
+          candidate: ${{ matrix.archivo }}
+          config: config/performance-gate.json
+          title: Performance Quality Gate - ${{ matrix.nombre }}
+          report-dir: reporte-${{ matrix.slug }}
+
+      - name: Publicar reporte
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-${{ matrix.slug }}
+          path: reporte-${{ matrix.slug }}
+          if-no-files-found: ignore

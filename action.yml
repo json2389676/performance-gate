@@ -1,0 +1,58 @@
+name: Performance Quality Gate
+description: >
+  Compara una prueba de carga (JMeter) contra producción y falla el pipeline si la
+  versión nueva es más lenta o tiene más errores que los límites configurados.
+author: json2389676
+
+inputs:
+  baseline:
+    description: Ruta del archivo de resultados de producción.
+    required: true
+  candidate:
+    description: Ruta del archivo de resultados de la versión nueva.
+    required: true
+  config:
+    description: Ruta del JSON con los límites. Si se omite, se usan los límites por defecto.
+    required: false
+    default: ""
+  format:
+    description: Formato de los resultados (por ahora solo jmeter).
+    required: false
+    default: jmeter
+  title:
+    description: Título del reporte.
+    required: false
+    default: Performance Quality Gate
+  report-dir:
+    description: Carpeta donde se escribe report.md y report.json.
+    required: false
+    default: performance-gate-report
+
+runs:
+  using: composite
+  steps:
+    - name: Evaluar resultados
+      shell: bash
+      env:
+        IN_BASELINE: ${{ inputs.baseline }}
+        IN_CANDIDATE: ${{ inputs.candidate }}
+        IN_CONFIG: ${{ inputs.config }}
+        IN_FORMAT: ${{ inputs.format }}
+        IN_TITLE: ${{ inputs.title }}
+        IN_REPORT_DIR: ${{ inputs.report-dir }}
+      run: |
+        mkdir -p "$IN_REPORT_DIR"
+        args=(--baseline "$IN_BASELINE" --candidate "$IN_CANDIDATE" --format "$IN_FORMAT"
+              --title "$IN_TITLE" --report-md "$IN_REPORT_DIR/report.md"
+              --report-json "$IN_REPORT_DIR/report.json")
+        if [ -n "$IN_CONFIG" ]; then args+=(--config "$IN_CONFIG"); fi
+
+        set +e
+        python3 "$GITHUB_ACTION_PATH/src/gate.py" "${args[@]}"
+        code=$?
+        set -e
+
+        if [ -f "$IN_REPORT_DIR/report.md" ]; then
+          cat "$IN_REPORT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit $code

@@ -174,6 +174,22 @@ Usa CSV pequeños creados para las pruebas. Luego ejecuta también el analizador
 4. Asegúrate de que un código de salida distinto de cero haga fallar el job. No ocultes el error con una opción que permita continuar.
 5. Publica el reporte como resumen de la ejecución o artefacto para que los resultados se vean durante la presentación.
 
+**Ya implementado en este repositorio:**
+
+- [action.yml](./action.yml): la action reutilizable. Otros equipos la usan con `uses: json2389676/performance-gate@main`.
+- `.github/workflows/ci.yml`: ejecuta las pruebas unitarias en cada `push`.
+- `.github/workflows/performance-gate.yml`: usa la action con la versión A y con la B (un job por versión). Se ejecuta en cada `push` a `main` y también manualmente (*Actions → Run workflow*). Ambos jobs deben quedar en **rojo**, y el resumen de cada ejecución muestra la tabla por endpoint y lo que debe mejorar el equipo.
+
+Ejemplo de uso desde el pipeline de otro equipo:
+
+```yaml
+- uses: json2389676/performance-gate@main
+  with:
+    baseline: resultados/produccion-actual.csv
+    candidate: resultados/mi-version.csv
+    config: config/performance-gate.json   # opcional
+```
+
 ## Paso 7. Analizar los resultados de este reto
 
 Con los datos incluidos, estos son algunos resultados para validar la herramienta:
