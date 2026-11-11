@@ -110,6 +110,7 @@ Empieza con reglas simples, visibles y configurables. Por ejemplo:
    {
      "defaults": {
        "p95RegressionPercent": 10,
+       "p95RegressionMinMs": 20,
        "errorRateIncreasePercentagePoints": 0.5,
        "minimumSamples": 100
      },
@@ -118,11 +119,22 @@ Empieza con reglas simples, visibles y configurables. Por ejemplo:
          "p95RegressionPercent": 5
        }
      },
-     "unknownEndpoint": "fail"
+     "onNewEndpoint": "warn",
+     "onMissingEndpoint": "fail",
+     "onInconclusive": "warn"
    }
    ```
 
-   Los valores son un punto de partida, no una regla universal. Documenta qué significa cada límite y permite ajustarlo. Para un endpoint nuevo sin línea base, informa que no se pudo comparar; configura explícitamente si eso debe fallar (`fail`) o solo advertir (`warn`). Para un gate estricto, es más seguro fallar.
+   Los valores son un punto de partida, no una regla universal. `p95RegressionMinMs` evita falsos rechazos en endpoints muy rápidos: el p95 solo falla si sube más del porcentaje **y** más de esos milisegundos. Las claves `on...` definen qué pasa (`fail` o `warn`) con un endpoint nuevo sin línea base, con uno que desapareció de la prueba, o con uno con pocas muestras (inconcluso). Un endpoint nuevo es normal en una versión nueva, por eso por defecto solo advierte; uno que desaparece sí hace fallar.
+
+   La implementación está en `src/` (`jmeter.py`, `config.py`, `gate.py`) y se ejecuta así:
+
+   ```bash
+   python3 src/gate.py --baseline resultados/produccion-actual.csv \
+     --candidate resultados/version-a.csv --config config/performance-gate.json
+   ```
+
+   Códigos de salida: `0` pasa, `1` no pasa, `2` error de datos o configuración.
 
 ## Paso 4. Implementar el analizador
 

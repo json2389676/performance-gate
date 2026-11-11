@@ -1,0 +1,16 @@
+{
+  "defaults": {
+    "p95RegressionPercent": 10,
+    "p95RegressionMinMs": 20,
+    "errorRateIncreasePercentagePoints": 0.5,
+    "minimumSamples": 100
+  },
+  "endpoints": {
+    "POST /pagos": {
+      "p95RegressionPercent": 5
+    }
+  },
+  "onNewEndpoint": "warn",
+  "onMissingEndpoint": "fail",
+  "onInconclusive": "warn"
+}
